@@ -16,9 +16,12 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <map>
+#include <vector>
 
 #include "fmt/format.h"
 #include "iostream"
@@ -26,6 +29,9 @@
 #include "vsag/vsag.h"
 
 namespace py = pybind11;
+
+using FloatArray = py::array_t<float, py::array::c_style | py::array::forcecast>;
+using Int64Array = py::array_t<int64_t, py::array::c_style | py::array::forcecast>;
 
 void
 SetLoggerOff() {
@@ -149,7 +155,7 @@ public:
 
 public:
     void
-    Build(py::array_t<float> vectors, py::array_t<int64_t> ids, size_t num_elements, size_t dim) {
+    Build(FloatArray vectors, Int64Array ids, size_t num_elements, size_t dim) {
         auto dataset = vsag::Dataset::Make();
         dataset->Owner(false)
             ->Dim(dim)
@@ -157,6 +163,41 @@ public:
             ->Ids(ids.mutable_data())
             ->Float32Vectors(vectors.mutable_data());
         index_->Build(dataset);
+    }
+
+    void
+    Add(FloatArray vectors, Int64Array ids, size_t num_elements, size_t dim) {
+        auto dataset = vsag::Dataset::Make();
+        dataset->Owner(false)
+            ->Dim(dim)
+            ->NumElements(num_elements)
+            ->Ids(ids.mutable_data())
+            ->Float32Vectors(vectors.mutable_data());
+        auto add_result = index_->Add(dataset);
+        if (!add_result.has_value()) {
+            throw std::runtime_error(fmt::format("failed to add vectors: {}",
+                                                 add_result.error().message));
+        }
+        if (!add_result.value().empty()) {
+            throw std::runtime_error(
+                fmt::format("{} ids failed to insert", add_result.value().size()));
+        }
+    }
+
+    void
+    Remove(Int64Array ids) {
+        auto buf = ids.request();
+        if (buf.ndim != 1) {
+            throw std::invalid_argument("ids must be a 1-dimensional array");
+        }
+        auto* data = ids.mutable_data();
+        for (py::ssize_t i = 0; i < buf.shape[0]; ++i) {
+            auto remove_res = index_->Remove(data[i]);
+            if (!remove_res.has_value()) {
+                throw std::runtime_error(
+                    fmt::format("failed to remove id {}: {}", data[i], remove_res.error().message));
+            }
+        }
     }
 
     void
@@ -187,31 +228,62 @@ public:
     }
 
     py::object
-    KnnSearch(py::array_t<float> vector, size_t k, std::string& parameters) {
-        auto query = vsag::Dataset::Make();
+    KnnSearch(FloatArray vectors, size_t k, std::string& parameters) {
+        auto buf = vectors.request();
+        if (buf.ndim != 1 && buf.ndim != 2) {
+            throw std::invalid_argument("vector must be 1d or 2d array");
+        }
+
         size_t data_num = 1;
-        query->NumElements(data_num)
-            ->Dim(vector.size())
-            ->Float32Vectors(vector.mutable_data())
+        size_t dim = static_cast<size_t>(buf.shape[0]);
+        if (buf.ndim == 2) {
+            data_num = static_cast<size_t>(buf.shape[0]);
+            dim = static_cast<size_t>(buf.shape[1]);
+        }
+
+        auto query = vsag::Dataset::Make();
+        query->NumElements(static_cast<int64_t>(data_num))
+            ->Dim(static_cast<int64_t>(dim))
+            ->Float32Vectors(static_cast<float*>(buf.ptr))
             ->Owner(false);
 
-        size_t ids_shape[1]{k};
-        size_t ids_strides[1]{sizeof(int64_t)};
-        size_t dists_shape[1]{k};
-        size_t dists_strides[1]{sizeof(float)};
+        py::array_t<int64_t> ids;
+        py::array_t<float> dists;
+        if (data_num == 1) {
+            ids = py::array_t<int64_t>(k);
+            dists = py::array_t<float>(k);
+        } else {
+            std::vector<py::ssize_t> shape = {
+                static_cast<py::ssize_t>(data_num), static_cast<py::ssize_t>(k)};
+            ids = py::array_t<int64_t>(shape);
+            dists = py::array_t<float>(shape);
+        }
 
-        auto ids = py::array_t<int64_t>(ids_shape, ids_strides);
-        auto dists = py::array_t<float>(dists_shape, dists_strides);
+        auto* ids_ptr = ids.mutable_data();
+        auto* dists_ptr = dists.mutable_data();
+        std::fill(ids_ptr, ids_ptr + static_cast<py::ssize_t>(data_num * k), int64_t{-1});
+        std::fill(dists_ptr,
+              dists_ptr + static_cast<py::ssize_t>(data_num * k),
+                  std::numeric_limits<float>::infinity());
+
         if (auto result = index_->KnnSearch(query, k, parameters); result.has_value()) {
-            auto ids_view = ids.mutable_unchecked<1>();
-            auto dists_view = dists.mutable_unchecked<1>();
+            auto dataset = result.value();
+            auto vsag_ids = dataset->GetIds();
+            auto vsag_distances = dataset->GetDistances();
+            auto available_k = std::min(static_cast<size_t>(dataset->GetDim()), k);
+            auto available_queries =
+                std::min(static_cast<size_t>(dataset->GetNumElements()), data_num);
 
-            auto vsag_ids = result.value()->GetIds();
-            auto vsag_distances = result.value()->GetDistances();
-            for (uint32_t i = 0; i < data_num * k; ++i) {
-                ids_view(i) = vsag_ids[i];
-                dists_view(i) = vsag_distances[i];
+            for (size_t qi = 0; qi < available_queries; ++qi) {
+                for (size_t kj = 0; kj < available_k; ++kj) {
+                    size_t src_idx = qi * static_cast<size_t>(dataset->GetDim()) + kj;
+                    size_t dst_idx = qi * k + kj;
+                    ids_ptr[dst_idx] = vsag_ids[src_idx];
+                    dists_ptr[dst_idx] = vsag_distances[src_idx];
+                }
             }
+        } else {
+            throw std::runtime_error(result.error().message);
         }
 
         return py::make_tuple(ids, dists);
@@ -303,12 +375,18 @@ PYBIND11_MODULE(_pyvsag, m) {
     m.def("set_logger_debug", &SetLoggerDebug, "SetLoggerDebug");
     py::class_<Index>(m, "Index")
         .def(py::init<std::string, std::string&>(), py::arg("name"), py::arg("parameters"))
-        .def("build",
-             &Index::Build,
-             py::arg("vectors"),
-             py::arg("ids"),
-             py::arg("num_elements"),
-             py::arg("dim"))
+           .def("build",
+               &Index::Build,
+               py::arg("vectors"),
+               py::arg("ids"),
+               py::arg("num_elements"),
+               py::arg("dim"))
+           .def("add",
+               &Index::Add,
+               py::arg("vectors"),
+               py::arg("ids"),
+               py::arg("num_elements"),
+               py::arg("dim"))
         .def("build",
              &Index::SparseBuild,
              py::arg("index_pointers"),
@@ -317,6 +395,7 @@ PYBIND11_MODULE(_pyvsag, m) {
              py::arg("ids"))
         .def(
             "knn_search", &Index::KnnSearch, py::arg("vector"), py::arg("k"), py::arg("parameters"))
+           .def("remove", &Index::Remove, py::arg("ids"))
         .def("knn_search",
              &Index::SparseKnnSearch,
              py::arg("index_pointers"),
