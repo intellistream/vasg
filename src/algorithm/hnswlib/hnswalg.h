@@ -108,6 +108,13 @@ private:
 
     size_t data_size_{0};
     size_t prefetch_jump_code_size_{1};
+    
+    // prefetch mode: 0=disabled, 1=hardcoded, 2=custom
+    int prefetch_mode_{1};  // default to hardcoded
+    
+    // user-configurable prefetch parameters (only used when mode=2)
+    uint32_t prefetch_stride_codes_{1};
+    uint32_t prefetch_depth_codes_{1};
 
     size_t data_element_per_block_{0};
 
@@ -245,6 +252,22 @@ public:
     bruteForce(const void* data_point,
                int64_t k,
                const vsag::FilterPtr is_id_allowed = nullptr) const override;
+
+    // Set prefetch mode: 0=disabled, 1=hardcoded, 2=custom
+    void
+    setPrefetchMode(int mode) {
+        if (mode < 0 || mode > 2) {
+            throw std::invalid_argument("prefetch_mode must be 0 (disabled), 1 (hardcoded), or 2 (custom)");
+        }
+        prefetch_mode_ = mode;
+    }
+
+    // Set custom prefetch optimization parameters (used when mode=2)
+    void
+    setPrefetchParameters(uint32_t stride_codes, uint32_t depth_codes) {
+        prefetch_stride_codes_ = stride_codes;
+        prefetch_depth_codes_ = depth_codes;
+    }
 
     int
     getRandomLevel(double reverse_size);

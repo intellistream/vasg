@@ -558,22 +558,43 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
             metric_distance_computations_ += size;
         }
 
-        auto vector_data_ptr = data_level0_memory_->GetElementPtr((*(data + 1)), offset_data_);
-        vsag::PrefetchLines((char*)(visited_array + *(data + 1)), 64);
-        vsag::PrefetchLines((char*)(visited_array + *(data + 1) + 64), 64);
-        vsag::PrefetchLines(vector_data_ptr, data_size_);
-        vsag::PrefetchLines((char*)(data + 2), 64);
+        // Prefetch based on mode: 0=disabled, 1=hardcoded, 2=custom
+        if (prefetch_mode_ != 0) {  // not disabled
+            auto vector_data_ptr = data_level0_memory_->GetElementPtr((*(data + 1)), offset_data_);
+            vsag::PrefetchLines((char*)(visited_array + *(data + 1)), 64);
+            vsag::PrefetchLines((char*)(visited_array + *(data + 1) + 64), 64);
+            
+            if (prefetch_mode_ == 1) {  // hardcoded mode
+                vsag::PrefetchLines(vector_data_ptr, data_size_);
+            } else {  // custom mode
+                vsag::PrefetchLines(vector_data_ptr, prefetch_depth_codes_ * 64);
+            }
+            vsag::PrefetchLines((char*)(data + 2), 64);
+        }
 
         for (size_t j = 1; j <= size; j++) {
             int candidate_id = *(data + j);
             size_t pre_l = std::min(j, size - 2);
-            if (pre_l + prefetch_jump_code_size_ <= size) {
-                vector_data_ptr = data_level0_memory_->GetElementPtr(
-                    (*(data + pre_l + prefetch_jump_code_size_)), offset_data_);
-                vsag::PrefetchLines(
-                    (char*)(visited_array + *(data + pre_l + prefetch_jump_code_size_)), 64);
-                vsag::PrefetchLines(vector_data_ptr, data_size_);
+            
+            // Prefetch based on mode
+            if (prefetch_mode_ == 1) {  // hardcoded mode
+                if (pre_l + prefetch_jump_code_size_ <= size) {
+                    auto vector_data_ptr = data_level0_memory_->GetElementPtr(
+                        (*(data + pre_l + prefetch_jump_code_size_)), offset_data_);
+                    vsag::PrefetchLines(
+                        (char*)(visited_array + *(data + pre_l + prefetch_jump_code_size_)), 64);
+                    vsag::PrefetchLines(vector_data_ptr, data_size_);
+                }
+            } else if (prefetch_mode_ == 2) {  // custom mode
+                if (pre_l + prefetch_stride_codes_ <= size) {
+                    auto vector_data_ptr = data_level0_memory_->GetElementPtr(
+                        (*(data + pre_l + prefetch_stride_codes_)), offset_data_);
+                    vsag::PrefetchLines(
+                        (char*)(visited_array + *(data + pre_l + prefetch_stride_codes_)), 64);
+                    vsag::PrefetchLines(vector_data_ptr, prefetch_depth_codes_ * 64);
+                }
             }
+            
             if (visited_array[candidate_id] != visited_array_tag) {
                 visited_array[candidate_id] = visited_array_tag;
                 if (is_id_allowed && not candidate_set.empty() &&
@@ -586,9 +607,12 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                 dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
                 if (top_candidates.size() < ef || lower_bound > dist) {
                     candidate_set.emplace(-dist, candidate_id);
-                    vector_data_ptr = data_level0_memory_->GetElementPtr(candidate_set.top().second,
-                                                                         offsetLevel0_);
-                    vsag::PrefetchLines(vector_data_ptr, 64);
+                    
+                    if (prefetch_mode_ != 0) {  // prefetch enabled
+                        auto vector_data_ptr = data_level0_memory_->GetElementPtr(candidate_set.top().second,
+                                                                             offsetLevel0_);
+                        vsag::PrefetchLines(vector_data_ptr, 64);
+                    }
 
                     if ((!has_deletions || !isMarkedDeleted(candidate_id)) &&
                         ((!is_id_allowed) ||
@@ -664,22 +688,43 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
             metric_distance_computations_ += size;
         }
 
-        auto vector_data_ptr = data_level0_memory_->GetElementPtr((*(data + 1)), offset_data_);
-        vsag::PrefetchLines((char*)(visited_array + *(data + 1)), 64);
-        vsag::PrefetchLines((char*)(visited_array + *(data + 1) + 64), 64);
-        vsag::PrefetchLines(vector_data_ptr, 64);
-        vsag::PrefetchLines((char*)(data + 2), 64);
+        // Prefetch based on mode: 0=disabled, 1=hardcoded, 2=custom
+        if (prefetch_mode_ != 0) {  // not disabled
+            auto vector_data_ptr = data_level0_memory_->GetElementPtr((*(data + 1)), offset_data_);
+            vsag::PrefetchLines((char*)(visited_array + *(data + 1)), 64);
+            vsag::PrefetchLines((char*)(visited_array + *(data + 1) + 64), 64);
+            
+            if (prefetch_mode_ == 1) {  // hardcoded mode
+                vsag::PrefetchLines(vector_data_ptr, data_size_);
+            } else {  // custom mode
+                vsag::PrefetchLines(vector_data_ptr, prefetch_depth_codes_ * 64);
+            }
+            vsag::PrefetchLines((char*)(data + 2), 64);
+        }
 
         for (size_t j = 1; j <= size; j++) {
             int candidate_id = *(data + j);
             size_t pre_l = std::min(j, size - 2);
-            if (pre_l + prefetch_jump_code_size_ <= size) {
-                vector_data_ptr = data_level0_memory_->GetElementPtr(
-                    (*(data + pre_l + prefetch_jump_code_size_)), offset_data_);
-                vsag::PrefetchLines(
-                    (char*)(visited_array + *(data + pre_l + prefetch_jump_code_size_)), 64);
-                vsag::PrefetchLines(vector_data_ptr, data_size_);
+            
+            // Prefetch based on mode
+            if (prefetch_mode_ == 1) {  // hardcoded mode
+                if (pre_l + prefetch_jump_code_size_ <= size) {
+                    auto vector_data_ptr = data_level0_memory_->GetElementPtr(
+                        (*(data + pre_l + prefetch_jump_code_size_)), offset_data_);
+                    vsag::PrefetchLines(
+                        (char*)(visited_array + *(data + pre_l + prefetch_jump_code_size_)), 64);
+                    vsag::PrefetchLines(vector_data_ptr, data_size_);
+                }
+            } else if (prefetch_mode_ == 2) {  // custom mode
+                if (pre_l + prefetch_stride_codes_ <= size) {
+                    auto vector_data_ptr = data_level0_memory_->GetElementPtr(
+                        (*(data + pre_l + prefetch_stride_codes_)), offset_data_);
+                    vsag::PrefetchLines(
+                        (char*)(visited_array + *(data + pre_l + prefetch_stride_codes_)), 64);
+                    vsag::PrefetchLines(vector_data_ptr, prefetch_depth_codes_ * 64);
+                }
             }
+            
             if (visited_array[candidate_id] != visited_array_tag) {
                 visited_array[candidate_id] = visited_array_tag;
                 ++visited_count;
@@ -690,9 +735,12 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                 if (visited_count < ef || dist <= radius + vsag::THRESHOLD_ERROR ||
                     lower_bound > dist) {
                     candidate_set.emplace(-dist, candidate_id);
-                    vector_data_ptr = data_level0_memory_->GetElementPtr(candidate_set.top().second,
-                                                                         offsetLevel0_);
-                    vsag::PrefetchLines(vector_data_ptr, 64);
+                    
+                    if (prefetch_mode_ != 0) {  // prefetch enabled
+                        auto vector_data_ptr = data_level0_memory_->GetElementPtr(candidate_set.top().second,
+                                                                             offsetLevel0_);
+                        vsag::PrefetchLines(vector_data_ptr, 64);
+                    }
 
                     if ((!has_deletions || !isMarkedDeleted(candidate_id)) &&
                         ((!is_id_allowed) ||

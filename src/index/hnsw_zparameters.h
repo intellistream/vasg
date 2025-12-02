@@ -24,6 +24,13 @@
 
 namespace vsag {
 
+// Prefetch optimization modes
+enum class PrefetchMode {
+    DISABLED = 0,    // No prefetching
+    HARDCODED = 1,   // Use hardcoded prefetch_jump_code_size_ (auto-calculated)
+    CUSTOM = 2       // Use user-defined prefetch parameters
+};
+
 struct HnswParameters {
 public:
     static HnswParameters
@@ -39,6 +46,9 @@ public:
     bool normalize{false};
     bool use_reversed_edges{false};
     DataTypes type{DataTypes::DATA_TYPE_FLOAT};
+    
+    // prefetch optimization mode (set at build time)
+    PrefetchMode prefetch_mode{PrefetchMode::HARDCODED};
 
 protected:
     HnswParameters() = default;
@@ -63,6 +73,14 @@ public:
     int64_t ef_search;
     float skip_ratio{0.9};
     bool use_conjugate_graph_search;
+    
+    // prefetch optimization mode (can override at search time)
+    PrefetchMode prefetch_mode{PrefetchMode::HARDCODED};
+    
+    // custom prefetch parameters (only used when mode is CUSTOM)
+    uint32_t prefetch_stride_codes{1};
+    uint32_t prefetch_depth_codes{1};
+    uint32_t prefetch_stride_visit{3};
 
 private:
     HnswSearchParameters() = default;

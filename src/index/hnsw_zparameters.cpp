@@ -81,6 +81,24 @@ HnswParameters::FromJson(const JsonType& hnsw_param_obj,
     } else {
         obj.use_conjugate_graph = false;
     }
+    
+    // set obj.prefetch_mode
+    if (hnsw_param_obj.Contains(HNSW_PARAMETER_PREFETCH_MODE)) {
+        std::string mode_str = hnsw_param_obj[HNSW_PARAMETER_PREFETCH_MODE].GetString();
+        if (mode_str == "disabled") {
+            obj.prefetch_mode = PrefetchMode::DISABLED;
+        } else if (mode_str == "hardcoded") {
+            obj.prefetch_mode = PrefetchMode::HARDCODED;
+        } else if (mode_str == "custom") {
+            obj.prefetch_mode = PrefetchMode::CUSTOM;
+        } else {
+            throw std::invalid_argument(
+                fmt::format("invalid prefetch_mode: '{}', must be 'disabled', 'hardcoded', or 'custom'", mode_str));
+        }
+    } else {
+        obj.prefetch_mode = PrefetchMode::HARDCODED;  // default
+    }
+    
     return obj;
 }
 
@@ -116,6 +134,32 @@ HnswSearchParameters::FromJson(const std::string& json_string) {
 
     if (params[index_name].Contains(HNSW_PARAMETER_SKIP_RATIO)) {
         obj.skip_ratio = params[index_name][HNSW_PARAMETER_SKIP_RATIO].GetFloat();
+    }
+
+    // set prefetch mode (can override at search time)
+    if (params[index_name].Contains(HNSW_PARAMETER_PREFETCH_MODE)) {
+        std::string mode_str = params[index_name][HNSW_PARAMETER_PREFETCH_MODE].GetString();
+        if (mode_str == "disabled") {
+            obj.prefetch_mode = PrefetchMode::DISABLED;
+        } else if (mode_str == "hardcoded") {
+            obj.prefetch_mode = PrefetchMode::HARDCODED;
+        } else if (mode_str == "custom") {
+            obj.prefetch_mode = PrefetchMode::CUSTOM;
+        } else {
+            throw std::invalid_argument(
+                fmt::format("invalid prefetch_mode: '{}', must be 'disabled', 'hardcoded', or 'custom'", mode_str));
+        }
+    }
+
+    // set custom prefetch optimization parameters (only used when mode is CUSTOM)
+    if (params[index_name].Contains(PREFETCH_STRIDE_CODE)) {
+        obj.prefetch_stride_codes = params[index_name][PREFETCH_STRIDE_CODE].GetInt();
+    }
+    if (params[index_name].Contains(PREFETCH_DEPTH_CODE)) {
+        obj.prefetch_depth_codes = params[index_name][PREFETCH_DEPTH_CODE].GetInt();
+    }
+    if (params[index_name].Contains(PREFETCH_STRIDE_VISIT)) {
+        obj.prefetch_stride_visit = params[index_name][PREFETCH_STRIDE_VISIT].GetInt();
     }
 
     return obj;

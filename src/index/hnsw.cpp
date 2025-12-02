@@ -95,11 +95,15 @@ HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_para
             hnsw_params.ef_construction,
             Options::Instance().block_size_limit());
     }
+    
+    // Set prefetch mode at build time
+    auto* hnsw_index = dynamic_cast<hnswlib::HierarchicalNSW*>(alg_hnsw_.get());
+    if (hnsw_index != nullptr) {
+        hnsw_index->setPrefetchMode(static_cast<int>(hnsw_params.prefetch_mode));
+    }
 
     this->init_feature_list();
-}
-
-tl::expected<std::vector<int64_t>, Error>
+}tl::expected<std::vector<int64_t>, Error>
 HNSW::build(const DatasetPtr& base) {
     std::shared_lock status_lock(index_status_mutex_);
     if (not this->IsValidStatus()) {
@@ -287,6 +291,19 @@ HNSW::knn_search(const DatasetPtr& query,
             (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
             fmt::format(
                 "ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
+
+        // apply prefetch mode and parameters
+        auto* hnsw_index = dynamic_cast<hnswlib::HierarchicalNSW*>(alg_hnsw_.get());
+        if (hnsw_index != nullptr) {
+            // Set prefetch mode (can override at search time)
+            hnsw_index->setPrefetchMode(static_cast<int>(params.prefetch_mode));
+            
+            // If custom mode, set custom parameters
+            if (params.prefetch_mode == PrefetchMode::CUSTOM) {
+                hnsw_index->setPrefetchParameters(params.prefetch_stride_codes, 
+                                                 params.prefetch_depth_codes);
+            }
+        }
 
         // check k
         CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k))
