@@ -28,7 +28,8 @@ namespace vsag {
 enum class PrefetchMode {
     DISABLED = 0,    // No prefetching
     HARDCODED = 1,   // Use hardcoded prefetch_jump_code_size_ (auto-calculated)
-    CUSTOM = 2       // Use user-defined prefetch parameters
+    CUSTOM = 2,      // Use user-defined prefetch parameters
+    AUTO = 3         // Auto-tune via ELP optimizer (like HGraph)
 };
 
 struct HnswParameters {
@@ -49,6 +50,13 @@ public:
     
     // prefetch optimization mode (set at build time)
     PrefetchMode prefetch_mode{PrefetchMode::HARDCODED};
+    
+    // custom prefetch parameters (only used when mode is CUSTOM)
+    uint32_t prefetch_stride_codes{1};
+    uint32_t prefetch_depth_codes{1};
+    
+    // whether to use ELP optimizer for auto-tuning (used when mode is AUTO)
+    bool use_elp_optimizer{false};
 
 protected:
     HnswParameters() = default;

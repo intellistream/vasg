@@ -17,6 +17,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -109,12 +110,17 @@ private:
     size_t data_size_{0};
     size_t prefetch_jump_code_size_{1};
     
-    // prefetch mode: 0=disabled, 1=hardcoded, 2=custom
+    // prefetch mode: 0=disabled, 1=hardcoded, 2=custom, 3=auto
     int prefetch_mode_{1};  // default to hardcoded
     
-    // user-configurable prefetch parameters (only used when mode=2)
+    // user-configurable prefetch parameters (only used when mode=2 or 3)
     uint32_t prefetch_stride_codes_{1};
     uint32_t prefetch_depth_codes_{1};
+    
+    // mock run parameters for ELP optimizer
+    mutable uint64_t mock_ef_{80};
+    mutable uint64_t mock_topk_{10};
+    mutable uint32_t mock_n_trials_{10000};
 
     size_t data_element_per_block_{0};
 
@@ -253,21 +259,35 @@ public:
                int64_t k,
                const vsag::FilterPtr is_id_allowed = nullptr) const override;
 
-    // Set prefetch mode: 0=disabled, 1=hardcoded, 2=custom
+    // Set prefetch mode: 0=disabled, 1=hardcoded, 2=custom, 3=auto
     void
     setPrefetchMode(int mode) {
-        if (mode < 0 || mode > 2) {
-            throw std::invalid_argument("prefetch_mode must be 0 (disabled), 1 (hardcoded), or 2 (custom)");
+        if (mode < 0 || mode > 3) {
+            throw std::invalid_argument("prefetch_mode must be 0 (disabled), 1 (hardcoded), 2 (custom), or 3 (auto)");
         }
         prefetch_mode_ = mode;
     }
 
-    // Set custom prefetch optimization parameters (used when mode=2)
+    // Set custom prefetch optimization parameters (used when mode=2 or mode=3)
     void
     setPrefetchParameters(uint32_t stride_codes, uint32_t depth_codes) {
         prefetch_stride_codes_ = stride_codes;
         prefetch_depth_codes_ = depth_codes;
     }
+    
+    // ============== ELP Optimizer Interface (similar to BasicSearcher) ==============
+    
+    // Set runtime parameters for optimization
+    bool
+    SetRuntimeParameters(const vsag::UnorderedMap<std::string, float>& new_params);
+    
+    // Set mock parameters for optimization testing
+    void
+    SetMockParameters(uint64_t ef, uint64_t topk, uint32_t n_trials = 10000);
+    
+    // Run mock search for performance measurement
+    double
+    MockRun() const;
 
     int
     getRandomLevel(double reverse_size);

@@ -33,9 +33,11 @@
 #include "datacell/graph_interface.h"
 #include "hnsw_zparameters.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/basic_optimizer.h"
 #include "impl/conjugate_graph.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/logger/logger.h"
+#include "impl/runtime_parameter.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "index_impl.h"
@@ -434,6 +436,10 @@ private:
 
     void
     set_immutable();
+    
+    // ELP optimizer for auto-tuning prefetch parameters
+    void
+    elp_optimize();
 
 private:
     std::shared_ptr<hnswlib::AlgorithmInterface<float>> alg_hnsw_;
@@ -464,6 +470,10 @@ private:
     const IndexCommonParam index_common_param_;
 
     bool use_old_serial_format_{false};
+    
+    // ELP optimizer for auto mode
+    bool use_elp_optimizer_{false};
+    std::shared_ptr<Optimizer<hnswlib::HierarchicalNSW>> optimizer_{nullptr};
 };
 
 }  // namespace vsag

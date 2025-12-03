@@ -21,6 +21,7 @@
 #include "impl/searcher/basic_searcher.h"
 #include "utils/linear_congruential_generator.h"
 #include "utils/prefetch.h"
+#include "vsag/constants.h"
 
 namespace hnswlib {
 
@@ -452,16 +453,38 @@ HierarchicalNSW::searchBaseLayer(InnerIdType ep_id, const void* data_point, int 
                 link_data.get();  // = (int *)(linkList0_ + curNodeNum * size_links_per_element0_);
         size_t size = getListCount((linklistsizeint*)data);
         auto* datal = (InnerIdType*)(data + 1);
-        vsag::PrefetchLines((char*)(visited_array + *(data + 1)), 64);
-        vsag::PrefetchLines((char*)(visited_array + *(data + 1) + 64), 64);
-        vsag::PrefetchLines(getDataByInternalId(*datal), 64);
-        vsag::PrefetchLines(getDataByInternalId(*(datal + 1)), 64);
+
+        // Prefetch based on mode: 0=disabled, 1=hardcoded, 2=custom
+        if (prefetch_mode_ != 0) {  // not disabled
+            vsag::PrefetchLines((char*)(visited_array + *(data + 1)), 64);
+            vsag::PrefetchLines((char*)(visited_array + *(data + 1) + 64), 64);
+            
+            if (prefetch_mode_ == 1) {  // hardcoded mode
+                vsag::PrefetchLines(getDataByInternalId(*datal), 64);
+                vsag::PrefetchLines(getDataByInternalId(*(datal + 1)), 64);
+            } else {  // custom mode
+                vsag::PrefetchLines(getDataByInternalId(*datal), prefetch_depth_codes_ * 64);
+                if (size > 1) {
+                    vsag::PrefetchLines(getDataByInternalId(*(datal + 1)), prefetch_depth_codes_ * 64);
+                }
+            }
+        }
 
         for (size_t j = 0; j < size; j++) {
             InnerIdType candidate_id = *(datal + j);
             size_t pre_l = std::min(j, size - 2);
-            vsag::PrefetchLines((char*)(visited_array + *(datal + pre_l + 1)), 64);
-            vsag::PrefetchLines(getDataByInternalId(*(datal + pre_l + 1)), 64);
+            
+            // Prefetch based on mode
+            if (prefetch_mode_ == 1) {  // hardcoded mode
+                vsag::PrefetchLines((char*)(visited_array + *(datal + pre_l + 1)), 64);
+                vsag::PrefetchLines(getDataByInternalId(*(datal + pre_l + 1)), 64);
+            } else if (prefetch_mode_ == 2) {  // custom mode
+                if (pre_l + prefetch_stride_codes_ < size) {
+                    vsag::PrefetchLines((char*)(visited_array + *(datal + pre_l + prefetch_stride_codes_)), 64);
+                    vsag::PrefetchLines(getDataByInternalId(*(datal + pre_l + prefetch_stride_codes_)), prefetch_depth_codes_ * 64);
+                }
+            }
+            
             if (visited_array[candidate_id] == visited_array_tag)
                 continue;
             visited_array[candidate_id] = visited_array_tag;
@@ -470,7 +493,10 @@ HierarchicalNSW::searchBaseLayer(InnerIdType ep_id, const void* data_point, int 
             float dist1 = fstdistfunc_(data_point, currObj1, dist_func_param_);
             if (top_candidates.size() < ef_construction_ || lower_bound > dist1) {
                 candidateSet.emplace(-dist1, candidate_id);
-                vsag::PrefetchLines(getDataByInternalId(candidateSet.top().second), 64);
+                
+                if (prefetch_mode_ != 0) {  // prefetch enabled
+                    vsag::PrefetchLines(getDataByInternalId(candidateSet.top().second), 64);
+                }
 
                 if (not isMarkedDeleted(candidate_id))
                     top_candidates.emplace(dist1, candidate_id);
@@ -1892,6 +1918,66 @@ HierarchicalNSW::setImmutable() {
     this->points_locks_.reset();
     this->points_locks_ = std::make_shared<vsag::EmptyMutex>();
     this->immutable_ = true;
+}
+
+// ============== ELP Optimizer Interface Implementation ==============
+
+bool
+HierarchicalNSW::SetRuntimeParameters(const vsag::UnorderedMap<std::string, float>& new_params) {
+    bool ret = false;
+    
+    // Set prefetch_stride_codes
+    auto iter = new_params.find(vsag::PREFETCH_STRIDE_CODE);
+    if (iter != new_params.end()) {
+        prefetch_stride_codes_ = static_cast<uint32_t>(iter->second);
+        ret = true;
+    }
+    
+    // Set prefetch_depth_codes
+    iter = new_params.find(vsag::PREFETCH_DEPTH_CODE);
+    if (iter != new_params.end()) {
+        prefetch_depth_codes_ = static_cast<uint32_t>(iter->second);
+        ret = true;
+    }
+    
+    return ret;
+}
+
+void
+HierarchicalNSW::SetMockParameters(uint64_t ef, uint64_t topk, uint32_t n_trials) {
+    mock_ef_ = ef;
+    mock_topk_ = topk;
+    mock_n_trials_ = n_trials;
+}
+
+double
+HierarchicalNSW::MockRun() const {
+    if (cur_element_count_ == 0) {
+        return 0.0;
+    }
+    
+    uint32_t n_trials = std::min(mock_n_trials_, static_cast<uint32_t>(cur_element_count_));
+    double time_cost = 0.0;
+    
+    for (uint32_t i = 0; i < n_trials; ++i) {
+        // Get a random vector from the index as query
+        InnerIdType query_id = i % cur_element_count_;
+        const void* query_data = getDataByInternalId(query_id);
+        
+        // Get entry point
+        InnerIdType ep = enterpoint_node_;
+        
+        // Measure search time
+        auto st = std::chrono::high_resolution_clock::now();
+        
+        // Run search on base layer (layer 0)
+        searchBaseLayerST<false, false>(ep, query_data, mock_ef_, nullptr, 0.9f, nullptr, nullptr);
+        
+        auto ed = std::chrono::high_resolution_clock::now();
+        time_cost += std::chrono::duration<double>(ed - st).count();
+    }
+    
+    return time_cost;
 }
 
 }  // namespace hnswlib

@@ -91,12 +91,23 @@ HnswParameters::FromJson(const JsonType& hnsw_param_obj,
             obj.prefetch_mode = PrefetchMode::HARDCODED;
         } else if (mode_str == "custom") {
             obj.prefetch_mode = PrefetchMode::CUSTOM;
+        } else if (mode_str == "auto") {
+            obj.prefetch_mode = PrefetchMode::AUTO;
+            obj.use_elp_optimizer = true;
         } else {
             throw std::invalid_argument(
-                fmt::format("invalid prefetch_mode: '{}', must be 'disabled', 'hardcoded', or 'custom'", mode_str));
+                fmt::format("invalid prefetch_mode: '{}', must be 'disabled', 'hardcoded', 'custom', or 'auto'", mode_str));
         }
     } else {
         obj.prefetch_mode = PrefetchMode::HARDCODED;  // default
+    }
+    
+    // set custom prefetch parameters (only used when mode is CUSTOM)
+    if (hnsw_param_obj.Contains(PREFETCH_STRIDE_CODE)) {
+        obj.prefetch_stride_codes = hnsw_param_obj[PREFETCH_STRIDE_CODE].GetInt();
+    }
+    if (hnsw_param_obj.Contains(PREFETCH_DEPTH_CODE)) {
+        obj.prefetch_depth_codes = hnsw_param_obj[PREFETCH_DEPTH_CODE].GetInt();
     }
     
     return obj;

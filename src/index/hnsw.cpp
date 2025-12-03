@@ -56,7 +56,8 @@ HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_para
       max_degree_(hnsw_params.max_degree),
       dim_(index_common_param.dim_),
       index_common_param_(index_common_param),
-      use_old_serial_format_(index_common_param.use_old_serial_format_) {
+      use_old_serial_format_(index_common_param.use_old_serial_format_),
+      use_elp_optimizer_(hnsw_params.use_elp_optimizer) {
     auto M = std::min(  // NOLINT(readability-identifier-naming)
         std::max((int)hnsw_params.max_degree, MINIMAL_M),
         MAXIMAL_M);
@@ -99,11 +100,28 @@ HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_para
     // Set prefetch mode at build time
     auto* hnsw_index = dynamic_cast<hnswlib::HierarchicalNSW*>(alg_hnsw_.get());
     if (hnsw_index != nullptr) {
-        hnsw_index->setPrefetchMode(static_cast<int>(hnsw_params.prefetch_mode));
+        // For AUTO mode, set to CUSTOM mode first, optimizer will tune parameters later
+        if (hnsw_params.prefetch_mode == PrefetchMode::AUTO) {
+            hnsw_index->setPrefetchMode(static_cast<int>(PrefetchMode::CUSTOM));
+        } else {
+            hnsw_index->setPrefetchMode(static_cast<int>(hnsw_params.prefetch_mode));
+        }
+        // Set custom prefetch parameters (only effective when mode is CUSTOM)
+        if (hnsw_params.prefetch_mode == PrefetchMode::CUSTOM) {
+            hnsw_index->setPrefetchParameters(hnsw_params.prefetch_stride_codes,
+                                               hnsw_params.prefetch_depth_codes);
+        }
+    }
+    
+    // Initialize ELP optimizer for AUTO mode
+    if (use_elp_optimizer_) {
+        optimizer_ = std::make_shared<Optimizer<hnswlib::HierarchicalNSW>>(index_common_param);
     }
 
     this->init_feature_list();
-}tl::expected<std::vector<int64_t>, Error>
+}
+
+tl::expected<std::vector<int64_t>, Error>
 HNSW::build(const DatasetPtr& base) {
     std::shared_lock status_lock(index_status_mutex_);
     if (not this->IsValidStatus()) {
@@ -147,6 +165,11 @@ HNSW::build(const DatasetPtr& base) {
             SlowTaskTimer t("hnsw pq", 1000);
             auto* hnsw = static_cast<hnswlib::StaticHierarchicalNSW*>(alg_hnsw_.get());
             hnsw->encode_hnsw_data();
+        }
+        
+        // Perform ELP optimization if enabled
+        if (use_elp_optimizer_) {
+            elp_optimize();
         }
 
         return failed_ids;
@@ -1380,6 +1403,28 @@ void
 HNSW::set_immutable() {
     std::unique_lock lock(rw_mutex_);
     alg_hnsw_->setImmutable();
+}
+
+void
+HNSW::elp_optimize() {
+    if (!optimizer_ || use_static_) {
+        return;
+    }
+    
+    // Cast to HierarchicalNSW shared_ptr for optimizer
+    auto hnsw_ptr = std::dynamic_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
+    if (hnsw_ptr == nullptr) {
+        return;
+    }
+    
+    // Set mock parameters for optimization (similar to HGraph)
+    hnsw_ptr->SetMockParameters(80, 10, 100);  // mock_ef=80, mock_k=10, mock_n_trials=100
+    
+    // Register parameters to optimize (HNSW uses prefetch_stride_codes)
+    optimizer_->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 10, 1));
+    
+    // Run optimization
+    optimizer_->Optimize(hnsw_ptr);
 }
 
 }  // namespace vsag
