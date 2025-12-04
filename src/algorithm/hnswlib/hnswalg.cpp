@@ -1951,7 +1951,8 @@ HierarchicalNSW::SetMockParameters(uint64_t ef, uint64_t topk, uint32_t n_trials
 }
 
 double
-HierarchicalNSW::MockRun() const {
+HierarchicalNSW::MockRun(vsag::Statistics& stats) const {
+    (void)stats;  // unused, for interface compatibility
     if (cur_element_count_ == 0) {
         return 0.0;
     }

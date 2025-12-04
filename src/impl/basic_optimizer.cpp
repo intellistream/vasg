@@ -15,6 +15,7 @@
 
 #include "basic_optimizer.h"
 
+#include "algorithm/hnswlib/hnswalg.h"
 #include "algorithm/inner_index_interface.h"
 #include "searcher/basic_searcher.h"
 
@@ -111,4 +112,5 @@ Optimizer<OptimizableOBJ>::Optimize(std::shared_ptr<OptimizableOBJ> obj) {
 }
 
 template class Optimizer<BasicSearcher>;
+template class Optimizer<hnswlib::HierarchicalNSW>;
 }  // namespace vsag

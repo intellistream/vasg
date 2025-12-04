@@ -34,6 +34,7 @@
 #include <unordered_set>
 
 #include "algorithm_interface.h"
+#include "algorithm/inner_index_interface.h"
 #include "block_manager.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
@@ -287,7 +288,7 @@ public:
     
     // Run mock search for performance measurement
     double
-    MockRun() const;
+    MockRun(vsag::Statistics& stats) const;
 
     int
     getRandomLevel(double reverse_size);
